@@ -7,7 +7,7 @@ Parameters:
     Type: AWS::EC2::KeyPair::KeyName
     ConstraintDescription: must be the name of an existing EC2 KeyPair.
   InstanceType:
-    Description: head-jenkins EC2 instance type
+    Description: headjenkins EC2 instance type
     Type: String
     Default: t2.micro
     AllowedValues:
@@ -30,6 +30,13 @@ Parameters:
     Default: 0.0.0.0/0
     AllowedPattern: "(\\d{1,3})\\.(\\d{1,3})\\.(\\d{1,3})\\.(\\d{1,3})/(\\d{1,2})"
     ConstraintDescription: must be a valid IP CIDR range of the form x.x.x.x/x.
+  JenkinsInitialAdminPassword:
+    Description: The initial password for Jenkins admin user
+    Type: String
+    MinLength: '1'
+    MaxLength: '32'
+    ConstraintDescription: must be.
+    NoEcho: true
 Mappings:
   AWSInstanceType2Arch:
     t1.micro:
@@ -44,28 +51,30 @@ Mappings:
   AWSRegionArch2AMI:
     us-east-1:
       PV64: ami-2a69aa47
-      HVM64: ami-97785bed
+      HVM64: ami-14c5486b
+    us-east-2:
+      HVM64: ami-922914f7
     us-west-2:
       PV64: ami-7f77b31f
-      HVM64: ami-f2d3638a
+      HVM64: ami-e251209a
     us-west-1:
       PV64: ami-a2490dc2
-      HVM64: ami-824c4ee2
+      HVM64: ami-25110f45
     eu-west-1:
       PV64: ami-4cdd453f
-      HVM64: ami-d834aba1
+      HVM64: ami-ca0135b3
     eu-west-2:
       PV64: NOT_SUPPORTED
-      HVM64: ami-403e2524
+      HVM64: ami-a36f8dc4
     eu-west-3:
       PV64: NOT_SUPPORTED
-      HVM64: ami-8ee056f3
+      HVM64: ami-969c2deb
     eu-central-1:
       PV64: ami-6527cf0a
-      HVM64: ami-5652ce39
+      HVM64: ami-9a91b371
     ap-northeast-1:
       PV64: ami-3e42b65f
-      HVM64: ami-ceafcba8
+      HVM64: ami-92df37ed
     ap-northeast-2:
       PV64: NOT_SUPPORTED
       HVM64: ami-863090e8
@@ -74,22 +83,22 @@ Mappings:
       HVM64: ami-83444afe
     ap-southeast-1:
       PV64: ami-df9e4cbc
-      HVM64: ami-68097514
+      HVM64: ami-de90a5a2
     ap-southeast-2:
       PV64: ami-63351d00
-      HVM64: ami-942dd1f6
+      HVM64: ami-423bec20
     ap-south-1:
       PV64: NOT_SUPPORTED
-      HVM64: ami-531a4c3c
+      HVM64: ami-76d6f519
     us-east-2:
       PV64: NOT_SUPPORTED
       HVM64: ami-f63b1193
     ca-central-1:
       PV64: NOT_SUPPORTED
-      HVM64: ami-a954d1cd
+      HVM64: ami-338a0a57
     sa-east-1:
       PV64: ami-1ad34676
-      HVM64: ami-84175ae8
+      HVM64: ami-3885d854
     cn-north-1:
       PV64: ami-77559f1a
       HVM64: ami-cb19c4a6
@@ -97,7 +106,7 @@ Mappings:
       PV64: ami-80707be2
       HVM64: ami-3e60745c
 Resources:
-  head-jenkins-SG:
+  headjenkinsSG:
     Type: AWS::EC2::SecurityGroup
     Properties:
       GroupDescription: Enable HTTP access via port 8080 to Jenkins
@@ -113,14 +122,16 @@ Resources:
         ToPort: '22'
         CidrIp:
           Ref: SSHLocation
-  head-jenkins:
+  headjenkins:
     Type: AWS::EC2::Instance
     Metadata:
       AWS::CloudFormation::Init:
         configSets:
           jenkins_install:
           - install_cfn
+          - update_java
           - install_jenkins
+          - configure_jenkins
         install_cfn:
           files:
             "/etc/cfn/cfn-hup.conf":
@@ -145,13 +156,13 @@ Resources:
                   - 'triggers=post.update
 
 '
-                  - 'path=Resources.head-jenkins.Metadata.AWS::CloudFormation::Init
+                  - 'path=Resources.headjenkins.Metadata.AWS::CloudFormation::Init
 
 '
                   - 'action=/opt/aws/bin/cfn-init -v '
                   - "         --stack "
                   - Ref: AWS::StackName
-                  - "         --resource head-jenkins "
+                  - "         --resource headjenkins "
                   - "         --configsets jenkins_install "
                   - "         --region "
                   - Ref: AWS::Region
@@ -167,76 +178,39 @@ Resources:
                 files:
                 - "/etc/cfn/cfn-hup.conf"
                 - "/etc/cfn/hooks.d/cfn-auto-reloader.conf"
+        update_java:
+          commands:
+            005_install_new_java:
+              command: "sudo yum -y install java-1.8.0-openjdk"
+            010_remove_old_java:
+              command: "sudo yum -y remove java-1.7.0-openjdk"
+            020_add_jenkins_repo:
+              command: "sudo wget -O /etc/yum.repos.d/jenkins.repo http://pkg.jenkins-ci.org/redhat/jenkins.repo"
+            030_import_jenkins_key:
+              command: "sudo rpm --import https://pkg.jenkins.io/redhat/jenkins.io.key"
         install_jenkins:
-          packages:
-            yum:
-              php: []
-              php-mysql: []
-              mysql: []
-              mysql-server: []
-              mysql-devel: []
-              mysql-libs: []
-              httpd: []
-          sources:
-            "/var/www/html": http://wordpress.org/latest.tar.gz
-          files:
-            "/tmp/setup.mysql":
-              content:
-                Fn::Join:
-                - ''
-                - - 'CREATE DATABASE '
-                  - Ref: DBName
-                  - ";\n"
-                  - CREATE USER '
-                  - Ref: DBUser
-                  - "'@'localhost' IDENTIFIED BY '"
-                  - Ref: DBPassword
-                  - "';\n"
-                  - 'GRANT ALL ON '
-                  - Ref: DBName
-                  - ".* TO '"
-                  - Ref: DBUser
-                  - "'@'localhost';\n"
-                  - 'FLUSH PRIVILEGES;
-
-'
-              mode: '000400'
-              owner: root
-              group: root
-            "/tmp/create-wp-config":
-              content:
-                Fn::Join:
-                - ''
-                - - "#!/bin/bash -xe\n"
-                  - 'cp /var/www/html/wordpress/wp-config-sample.php /var/www/html/wordpress/wp-config.php
-
-'
-                  - sed -i "s/'database_name_here'/'
-                  - Ref: DBName
-                  - '''/g" wp-config.php
-
-'
-                  - sed -i "s/'username_here'/'
-                  - Ref: DBUser
-                  - '''/g" wp-config.php
-
-'
-                  - sed -i "s/'password_here'/'
-                  - Ref: DBPassword
-                  - '''/g" wp-config.php
-
-'
-              mode: '000500'
-              owner: root
-              group: root
+          commands:
+            010_install_jenkins_package:
+              command: "sudo yum install jenkins -y"
           services:
             sysvinit:
-              httpd:
+              jenkins:
                 enabled: 'true'
                 ensureRunning: 'true'
-              mysqld:
-                enabled: 'true'
-                ensureRunning: 'true'
+        configure_jenkins:
+          files:
+            "/var/lib/jenkins/secrets/initialAdminPassword":
+              content:
+                Fn::Join:
+                - ''
+                - - Ref: JenkinsInitialAdminPassword
+                  - "\n"
+              mode: '000640'
+              owner: jenkins
+              group: jenkins
+          commands:
+            010_secrets_dir:
+              command: "sudo chmod 700 /var/lib/jenkins/secrets/; sudo chown jenkins:jenkins /var/lib/jenkins/secrets/"
     Properties:
       ImageId:
         Fn::FindInMap:
@@ -249,143 +223,35 @@ Resources:
       InstanceType:
         Ref: InstanceType
       SecurityGroups:
-      - Ref: head-jenkins-SG
+      - Ref: headjenkinsSG
       KeyName:
         Ref: KeyName
-      UserData:
-        Fn::Base64:
-          Fn::Join:
+      UserData: !Base64 
+        'Fn::Join':
           - ''
-          - - "#!/bin/bash -xe\n"
-            - 'yum update -y aws-cfn-bootstrap
-
-'
-            - "/opt/aws/bin/cfn-init -v "
-            - "         --stack "
-            - Ref: AWS::StackName
-            - "         --resource head-jenkins "
-            - "         --configsets jenkins_install "
-            - "         --region "
-            - Ref: AWS::Region
-            - "\n"
-            - "/opt/aws/bin/cfn-signal -e $? "
-            - "         --stack "
-            - Ref: AWS::StackName
-            - "         --resource head-jenkins "
-            - "         --region "
-            - Ref: AWS::Region
-            - "\n"
-
-      UserData:
-        Fn::Base64:
-          Fn::Join:
-          - ''
-          - - "#!/bin/bash -xe\n"
-            - "# Helper function\n"
-            - 'function error_exit
-
-'
-            - "{\n"
-            - '  cfn-signal -e 1 -r "$1" '''
-            - Ref: WaitHandle
-            - "'\n"
-            - "  exit 1\n"
-            - "}\n"
-            - "/opt/aws/bin/cfn-init --stack "
-            - Ref: AWS::StackName
-            - "    --resource head-jenkins"
-            - "    --configsets jenkins_install"
-            - "    --access-key "
-            - Ref: HostKeys
-            - "    --secret-key "
-            - Fn::GetAtt:
-              - HostKeys
-              - SecretAccessKey
-            - "    --region "
-            - Ref: AWS::Region
-            - " || error_exit 'Failed to run cfn-init'\n"
-            - "# Post-cfn work\n"
-            - "# Updating to Java 8\n"
-            - "yum install -y java-1.8.0-openjdk.x86_64 || true \n"
-            - 'sudo /usr/sbin/alternatives --set java /usr/lib/jvm/jre-1.8.0-openjdk.x86_64/bin/java
-              || true
-
-'
-            - "sudo /usr/sbin/alternatives --set javac /usr/lib/jvm/jre-1.8.0-openjdk.x86_64/bin/javac
-              || true \n"
-            - "yum remove java-1.7 || true \n"
-            - 'sudo wget -O /etc/yum.repos.d/jenkins.repo http://pkg.jenkins.io/redhat-stable/jenkins.repo
-
-'
-            - 'sudo rpm --import http://pkg.jenkins.io/redhat-stable/jenkins.io.key
-
-'
-            - 'yum install -y jenkins
-
-'
-            - 'sudo mkdir -p /var/lib/jenkins
-
-'
-            - 'sudo chown -R jenkins:jenkins /var/lib/jenkins
-
-'
-            - "# Handle case where cron doesn't detect the new /etc/cron.d file\n"
-            - "#service cron restart\n"
-            - "# Attempt to restore from backup\n"
-            - 'export AWS_CONFIG_FILE=/etc/aws.conf
-
-'
-            - sudo /usr/local/bin/jenkins-restore s3://
-            - Ref: S3Bucket
-            - "/"
-            - Ref: S3Prefix
-            - " /var/lib/jenkins || true # ignore errors\n"
-            - 'sudo service jenkins start
-
-'
-            - 'sudo chown -R jenkins:jenkins /var/lib/jenkins
-
-'
-            - 'sudo chmod -R 755 /var/lib/jenkins
-
-'
-            - "# Start Jenkins\n"
-            - 'sudo service jenkins restart
-
-'
-            - 'sudo chkconfig jenkins on
-
-'
-            - 'sleep 400
-
-'
-            - "printf \"Subject: Your Jenkins Password\n\n"
-            - "$(cat /var/lib/jenkins/secrets/initialAdminPassword)\n"
-            - 'CHANGE THIS RIGHT AWAY AT: '
-            - http://
-            - Ref: DnsRecord
-            - "\" | sendmail -v "
-            - Ref: EmailAddress
-            - "\n"
-            - "# All is well, signal success\n"
-            - ./opt/aws/bin/cfn-signal --exit-code 0 --reason "Stack setup complete"
-              '
-            - Ref: WaitHandle
-            - "'\n"
-            - "#EOF"
-
-    CreationPolicy:
-      ResourceSignal:
-        Timeout: PT15M
+          - - |
+              #!/bin/bash -xe
+            - |
+              'sudo yum -y update'
+            - |
+              # Install the files and packages from the metadata
+            - '/opt/aws/bin/cfn-init -v '
+            - '         --stack '
+            - !Ref 'AWS::StackName'
+            - '         --resource headjenkins '
+            - '         --configsets jenkins_install '
+            - '         --region '
+            - !Ref 'AWS::Region'
+            - |+
 Outputs:
-  WebsiteURL:
+  JenkinsURL:
     Value:
       Fn::Join:
       - ''
       - - http://
         - Fn::GetAtt:
-          - head-jenkins
+          - headjenkins
           - PublicDnsName
-        - "/wordpress"
-    Description: WordPress Website
+        - ":8080"
+    Description: URL for configuring Jenkins
 

@@ -1,0 +1,17 @@
+---
+# Variables listed here are applicable to all host groups
+
+#Name for cloudformation stack.
+stack_name: "head-jenkins"
+
+#region where a stack will be created. available options: ap-northeast-1,ap-southeast-1,ap-southeast-2,eu-west-1,sa-east-1,us-east-1,us-west-1,us-west-2
+region: "us-west-1"
+
+#Name of an existing EC2 KeyPair to enable SSH access to the instances. !!!You should fill that parameter!!!
+KeyName: ""
+
+#The IP address range that can be used to SSH to the EC2 instances
+JenkinsLocation: "0.0.0.0/0"
+
+#The IP address range that can be used to Jenkins to the EC2 instances
+SSHLocation: "0.0.0.0/0"

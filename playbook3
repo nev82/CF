@@ -1,0 +1,21 @@
+---
+- hosts: "localhost"
+  connection: "local"
+  gather_facts: False
+
+  tasks:
+
+  - name: create head-jenkins cloudformation stack
+    cloudformation:
+      stack_name: {{ stack_name }}
+      state: "present"
+      region: {{ region }}
+      disable_rollback: false
+      template: "templates/head-jenkins.yaml"
+      template_parameters:
+        KeyName: {{ KeyName }}
+        JenkinsLocation: {{ JenkinsLocation }}
+        SSHLocation: {{ SSHLocation }}
+      tags:
+        Stack: "head-jenkins"
+    register: jenkins_stack
